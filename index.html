@@ -80,7 +80,7 @@
     <main class="max-w-7xl mx-auto px-4 pb-16 space-y-8">
 
       <!-- 首页：地图 + 搜索 -->
-      <div v-if="currentView === 'home'">
+      <div v-show="currentView === 'home'">
         <!-- 地图搜索栏 -->
         <section class="bg-white rounded-lg shadow-md p-4 md:p-6 mb-6 card-hover">
           <h2 class="text-lg font-bold text-pink-700 mb-3">搜索地图上的地方</h2>
@@ -135,7 +135,7 @@
       </div>
 
       <!-- 在一起时间页面 -->
-      <div v-if="currentView === 'days'" class="pt-4">
+      <div v-show="currentView === 'days'" class="pt-4">
         <section class="bg-white rounded-lg shadow-md p-6 card-hover cursor-pointer" @click="openDaysModal">
           <div class="flex flex-col md:flex-row items-center justify-between gap-6">
             <div class="text-center md:text-left">
@@ -156,7 +156,7 @@
       </div>
 
       <!-- 想对对方说的话页面 -->
-      <div v-if="currentView === 'messages'" class="pt-4">
+      <div v-show="currentView === 'messages'" class="pt-4">
         <section>
           <h2 class="text-xl font-bold text-pink-700 mb-4 px-1">想对对方说的话</h2>
           <div class="flex gap-4 overflow-x-auto hide-scrollbar pb-4 snap-x">
@@ -176,7 +176,7 @@
       </div>
 
       <!-- 我们的回忆页面 -->
-      <div v-if="currentView === 'memories'" class="pt-4">
+      <div v-show="currentView === 'memories'" class="pt-4">
         <section>
           <h2 class="text-xl font-bold text-pink-700 mb-4 px-1">我们的记忆</h2>
           <div v-if="filteredMemories.length === 0"
