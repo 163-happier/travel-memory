@@ -1,0 +1,931 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>我们的旅行记忆</title>
+  <!-- Tailwind CSS v3 CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Vue 3 CDN -->
+  <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+  <!-- ECharts 5 CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+  <script>
+    // 配置 Tailwind 主题色：浅粉色系
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: {
+            primary: '#f472b6',   // pink-400
+            secondary: '#fbcfe8', // pink-200
+            bg: '#fff1f2',        // rose-50
+          }
+        }
+      }
+    }
+  </script>
+  <style>
+    /* 全局字体与自定义动画 */
+    body {
+      font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+    }
+    /* 卡片悬浮轻微上浮 */
+    .card-hover {
+      transition: transform 0.3s ease, box-shadow 0.3s ease;
+    }
+    .card-hover:hover {
+      transform: translateY(-4px);
+      box-shadow: 0 10px 25px -5px rgba(244, 114, 182, 0.25);
+    }
+    /* 隐藏横向滚动条 */
+    .hide-scrollbar::-webkit-scrollbar {
+      display: none;
+    }
+    .hide-scrollbar {
+      -ms-overflow-style: none;
+      scrollbar-width: none;
+    }
+  </style>
+</head>
+<body class="bg-bg min-h-screen text-pink-900">
+
+  <div id="app">
+    <!-- 顶部固定导航栏：四个独立页面入口 -->
+    <nav class="fixed top-0 left-0 right-0 bg-white/90 backdrop-blur-md shadow-sm z-50">
+      <div class="max-w-7xl mx-auto px-4 py-3 flex justify-center items-center gap-4 md:gap-10">
+        <a href="#" @click.prevent="currentView = 'home'"
+          :class="{'text-pink-600 font-bold border-b-2 border-pink-500': currentView === 'home'}"
+          class="text-sm md:text-base text-pink-500 hover:text-pink-700 transition pb-1">首页</a>
+        <a href="#" @click.prevent="currentView = 'days'"
+          :class="{'text-pink-600 font-bold border-b-2 border-pink-500': currentView === 'days'}"
+          class="text-sm md:text-base text-pink-500 hover:text-pink-700 transition pb-1">在一起时间</a>
+        <a href="#" @click.prevent="currentView = 'messages'"
+          :class="{'text-pink-600 font-bold border-b-2 border-pink-500': currentView === 'messages'}"
+          class="text-sm md:text-base text-pink-500 hover:text-pink-700 transition pb-1">想对对方说的话</a>
+        <a href="#" @click.prevent="currentView = 'memories'"
+          :class="{'text-pink-600 font-bold border-b-2 border-pink-500': currentView === 'memories'}"
+          class="text-sm md:text-base text-pink-500 hover:text-pink-700 transition pb-1">我们的回忆</a>
+      </div>
+    </nav>
+
+    <!-- 页面标题 -->
+    <header class="text-center pt-24 pb-8 px-4">
+      <h1 class="text-3xl md:text-4xl font-bold text-pink-600 tracking-widest">我们的旅行记忆</h1>
+      <p class="text-pink-400 mt-2 text-sm">记录我们一起走过的每一个角落</p>
+    </header>
+
+    <main class="max-w-7xl mx-auto px-4 pb-16 space-y-8">
+
+      <!-- 首页：地图 + 搜索 -->
+      <div v-if="currentView === 'home'">
+        <!-- 地图搜索栏 -->
+        <section class="bg-white rounded-lg shadow-md p-4 md:p-6 mb-6 card-hover">
+          <h2 class="text-lg font-bold text-pink-700 mb-3">搜索地图上的地方</h2>
+          <div class="relative">
+            <input
+              v-model="searchQuery"
+              @input="onSearchInput"
+              @keyup.enter="confirmSearch"
+              type="text"
+              placeholder="输入地名，例如：宜宾市、巴黎、东京..."
+              class="w-full px-4 py-3 bg-pink-50 rounded-lg border border-pink-200 text-pink-800 placeholder-pink-300 focus:outline-none focus:border-pink-400"
+            >
+            <button
+              @click="confirmSearch"
+              class="absolute right-2 top-1.5 px-4 py-1.5 bg-pink-500 text-white rounded-md hover:bg-pink-600 transition text-sm">
+              定位
+            </button>
+            <!-- 搜索下拉结果 -->
+            <div
+              v-if="searchResults.length"
+              class="absolute z-10 left-0 right-0 mt-2 bg-white rounded-lg shadow-lg border border-pink-100 max-h-60 overflow-y-auto"
+              @mousedown.stop>
+              <div
+                v-for="r in searchResults"
+                :key="r.name"
+                @mousedown.stop="selectSearchResult(r)"
+                class="px-4 py-2.5 text-pink-700 hover:bg-pink-50 cursor-pointer text-sm border-b border-pink-50 last:border-0">
+                {{ r.name }}
+              </div>
+            </div>
+            <p v-if="searchQuery && !searchResults.length" class="text-pink-400 text-xs mt-2">未找到相关地点</p>
+          </div>
+        </section>
+
+        <!-- 地图模块 -->
+        <section class="bg-white rounded-lg shadow-md py-4 md:py-6 card-hover">
+          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 mb-4 px-4 md:px-6">
+            <h2 class="text-xl font-bold text-pink-700">{{ mapMode === 'china' ? '中国地图' : '世界地图' }}</h2>
+            <button @click="toggleMap"
+              class="px-4 py-2 bg-pink-100 text-pink-600 rounded-lg hover:bg-pink-200 transition text-sm font-medium">
+              {{ mapMode === 'china' ? '切换世界地图' : '切换中国地图' }}
+            </button>
+          </div>
+
+          <!-- ECharts 地图容器：拉长高度，中国地图贴近方框左右两边 -->
+          <div id="map-chart" ref="mapChart" class="w-full h-[82vh] min-h-[620px] bg-pink-50 overflow-hidden border-y border-pink-100 md:rounded-lg md:border"></div>
+
+          <p class="text-pink-400 text-xs mt-3 text-center px-4 md:px-6">
+            提示：滚动鼠标可缩放，拖拽可平移；点击任意省份/国家即可上传照片与记忆
+          </p>
+        </section>
+      </div>
+
+      <!-- 在一起时间页面 -->
+      <div v-if="currentView === 'days'" class="pt-4">
+        <section class="bg-white rounded-lg shadow-md p-6 card-hover cursor-pointer" @click="openDaysModal">
+          <div class="flex flex-col md:flex-row items-center justify-between gap-6">
+            <div class="text-center md:text-left">
+              <h2 class="text-xl font-bold text-pink-700 mb-2">我们在一起</h2>
+              <p class="text-4xl md:text-5xl font-bold text-pink-500">
+                {{ togetherDays }}
+                <span class="text-lg text-pink-400 font-medium">天</span>
+              </p>
+              <p class="text-pink-400 mt-2 text-sm">从 {{ startDate }} 开始</p>
+            </div>
+            <!-- 合照展示位 -->
+            <div class="w-32 h-32 md:w-40 md:h-40 rounded-lg overflow-hidden bg-pink-100 flex items-center justify-center border-2 border-dashed border-pink-300">
+              <img v-if="couplePhoto" :src="couplePhoto" class="w-full h-full object-cover" alt="合照">
+              <span v-else class="text-pink-400 text-sm text-center px-2">点击上传我们的合照</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 想对对方说的话页面 -->
+      <div v-if="currentView === 'messages'" class="pt-4">
+        <section>
+          <h2 class="text-xl font-bold text-pink-700 mb-4 px-1">想对对方说的话</h2>
+          <div class="flex gap-4 overflow-x-auto hide-scrollbar pb-4 snap-x">
+            <!-- 消息卡片 -->
+            <div v-for="(msg, index) in messages" :key="msg.id" @click="editMessage(index)"
+              class="snap-start flex-shrink-0 w-[45%] md:w-[23%] bg-white rounded-lg shadow-md p-5 card-hover cursor-pointer min-h-[170px] flex flex-col justify-between">
+              <p class="text-pink-800 text-sm leading-relaxed line-clamp-5">{{ msg.text || '点击写下想对 TA 说的话...' }}</p>
+              <p class="text-pink-300 text-xs mt-3 text-right">{{ msg.date }}</p>
+            </div>
+            <!-- 添加按钮 -->
+            <div @click="addMessage"
+              class="snap-start flex-shrink-0 w-[45%] md:w-[23%] bg-pink-100 rounded-lg shadow-md p-5 card-hover cursor-pointer min-h-[170px] flex items-center justify-center border-2 border-dashed border-pink-300">
+              <span class="text-pink-500 text-3xl font-light">+</span>
+            </div>
+          </div>
+        </section>
+      </div>
+
+      <!-- 我们的回忆页面 -->
+      <div v-if="currentView === 'memories'" class="pt-4">
+        <section>
+          <h2 class="text-xl font-bold text-pink-700 mb-4 px-1">我们的记忆</h2>
+          <div v-if="filteredMemories.length === 0"
+            class="text-center text-pink-400 py-14 bg-white rounded-lg shadow-md">
+            还没有旅行记忆，点击地图上的区域开始记录吧~
+          </div>
+          <div v-else class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div v-for="memory in filteredMemories" :key="memory.id" class="bg-white rounded-lg shadow-md overflow-hidden card-hover">
+              <div class="h-48 bg-pink-100 overflow-hidden relative">
+                <img v-if="(memory.photos && memory.photos[0]) || memory.photo" :src="memory.photos && memory.photos[0] ? memory.photos[0] : memory.photo" class="w-full h-full object-cover" alt="旅行照片">
+                <div v-else class="w-full h-full flex items-center justify-center text-pink-400 text-sm">未上传照片</div>
+                <span v-if="memory.photos && memory.photos.length > 1" class="absolute top-2 right-2 bg-pink-500 text-white text-xs px-2 py-0.5 rounded-full">{{ memory.photos.length }} 张</span>
+              </div>
+              <div class="p-4">
+                <div class="flex justify-between items-center mb-2">
+                  <span class="text-pink-600 font-bold">{{ memory.region }}</span>
+                  <span class="text-pink-300 text-xs">{{ memory.date }}</span>
+                </div>
+                <p class="text-pink-800 text-sm line-clamp-3">{{ memory.text }}</p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+
+    </main>
+
+    <!-- 通用编辑弹窗 -->
+    <div v-if="showModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50 p-4" @click.self="closeModal">
+      <div class="bg-white rounded-lg shadow-xl w-full max-w-md p-6 max-h-[90vh] overflow-y-auto">
+        <h3 class="text-xl font-bold text-pink-700 mb-5">{{ modalTitle }}</h3>
+
+        <!-- 地图区域表单 -->
+        <div v-if="modalType === 'region'" class="space-y-4">
+          <div>
+            <label class="block text-pink-600 text-sm mb-1.5">地区</label>
+            <input v-model="form.region" readonly
+              class="w-full px-3 py-2 bg-pink-50 rounded-lg border border-pink-200 text-pink-800">
+          </div>
+          <div>
+            <label class="block text-pink-600 text-sm mb-1.5">上传照片（最多 4 张，手机可从相册选择）</label>
+            <input type="file" accept="image/*" multiple @change="handleFileUpload"
+              class="block w-full text-sm text-pink-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-pink-100 file:text-pink-700 hover:file:bg-pink-200">
+            <div v-if="form.photos && form.photos.length" class="mt-3 grid grid-cols-2 gap-2">
+              <div v-for="(photo, idx) in form.photos" :key="idx" class="relative group">
+                <img :src="photo" class="w-full h-24 object-cover rounded-lg border border-pink-100">
+                <button @click.prevent="removePhoto(idx)"
+                  class="absolute top-1 right-1 w-5 h-5 bg-pink-500 text-white rounded-full text-xs flex items-center justify-center opacity-80 group-hover:opacity-100">×</button>
+              </div>
+            </div>
+          </div>
+          <div>
+            <label class="block text-pink-600 text-sm mb-1.5">文字记忆</label>
+            <textarea v-model="form.text" rows="4" placeholder="写下我们在这里的故事..."
+              class="w-full px-3 py-2 bg-pink-50 rounded-lg border border-pink-200 text-pink-800 focus:outline-none focus:border-pink-400 resize-none"></textarea>
+          </div>
+        </div>
+
+        <!-- 在一起天数表单 -->
+        <div v-if="modalType === 'days'" class="space-y-4">
+          <div>
+            <label class="block text-pink-600 text-sm mb-1.5">开始日期</label>
+            <input type="date" v-model="form.startDate"
+              class="w-full px-3 py-2 bg-pink-50 rounded-lg border border-pink-200 text-pink-800 focus:outline-none focus:border-pink-400">
+          </div>
+          <div>
+            <label class="block text-pink-600 text-sm mb-1.5">上传合照</label>
+            <input type="file" accept="image/*" @change="handleFileUpload"
+              class="block w-full text-sm text-pink-600 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-semibold file:bg-pink-100 file:text-pink-700 hover:file:bg-pink-200">
+            <img v-if="form.photo" :src="form.photo" class="mt-3 w-full h-44 object-cover rounded-lg border border-pink-100">
+          </div>
+        </div>
+
+        <!-- 想说的话表单 -->
+        <div v-if="modalType === 'message'" class="space-y-4">
+          <div>
+            <label class="block text-pink-600 text-sm mb-1.5">想对 TA 说</label>
+            <textarea v-model="form.text" rows="4" placeholder="写下此刻的心情..."
+              class="w-full px-3 py-2 bg-pink-50 rounded-lg border border-pink-200 text-pink-800 focus:outline-none focus:border-pink-400 resize-none"></textarea>
+          </div>
+        </div>
+
+        <div class="flex justify-end gap-3 mt-6">
+          <button @click="closeModal" class="px-4 py-2 rounded-lg text-pink-500 hover:bg-pink-50 transition">取消</button>
+          <button @click="saveModal" class="px-5 py-2 rounded-lg bg-pink-500 text-white hover:bg-pink-600 transition shadow-md shadow-pink-200">保存</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast 提示 -->
+    <div v-if="toast.show"
+      class="fixed top-20 left-1/2 transform -translate-x-1/2 bg-pink-500 text-white px-6 py-2 rounded-full shadow-lg z-50 text-sm transition-opacity duration-300">
+      {{ toast.message }}
+    </div>
+  </div>
+
+  <script>
+    const { createApp, ref, computed, onMounted, watch, nextTick } = Vue;
+
+    createApp({
+      setup() {
+        // localStorage 键名
+        const STORAGE_KEY = 'couple_travel_memory';
+
+        // ===== 核心数据 =====
+        const startDate = ref('2023-01-01');   // 在一起起始日期
+        const couplePhoto = ref('');           // 合照 Base64
+        const messages = ref([]);              // 想对对方说的话
+        const memories = ref([]);              // 旅行记忆列表
+        const mapMode = ref('china');          // china 或 world
+
+        // ECharts 实例
+        const mapChart = ref(null);
+        let chartInstance = null;
+        let currentGeoJson = null; // 当前加载的地图 GeoJSON，用于点击反查区域
+        let areaList = [];         // 全国行政区划列表，用于搜索时匹配父级地名
+
+        // ===== 弹窗状态 =====
+        const showModal = ref(false);
+        const modalType = ref('');             // region / days / message
+        const modalTitle = ref('');
+        const editingIndex = ref(-1);          // 用于编辑已有消息或记忆
+        const form = ref({ region: '', photos: [], photo: '', text: '', startDate: '' });
+
+        // ===== 页面视图状态 =====
+        const currentView = ref('home'); // home / days / messages / memories
+
+        // 切换视图后，若回到首页需要重新初始化或自适应地图
+        watch(currentView, async (val) => {
+          if (val === 'home') {
+            await nextTick();
+            if (!chartInstance || !echarts.getInstanceByDom(mapChart.value)) {
+              initChart();
+              await loadMap();
+            } else {
+              chartInstance.resize();
+            }
+          }
+        });
+
+        // ===== 地图搜索状态 =====
+        const searchQuery = ref('');
+        const searchResults = ref([]);
+
+        // ===== Toast 提示 =====
+        const toast = ref({ show: false, message: '' });
+        let toastTimer = null;
+        const showToast = (msg) => {
+          toast.value = { show: true, message: msg };
+          if (toastTimer) clearTimeout(toastTimer);
+          toastTimer = setTimeout(() => { toast.value.show = false; }, 2000);
+        };
+
+        // 世界地图部分国家中英文映射（让弹窗和记忆显示中文）
+        const worldNameMap = {
+          'China': '中国', 'United States': '美国', 'Russia': '俄罗斯', 'Canada': '加拿大',
+          'Brazil': '巴西', 'Australia': '澳大利亚', 'India': '印度', 'Argentina': '阿根廷',
+          'Kazakhstan': '哈萨克斯坦', 'Algeria': '阿尔及利亚', 'Democratic Republic of the Congo': '刚果（金）',
+          'Saudi Arabia': '沙特阿拉伯', 'Mexico': '墨西哥', 'Indonesia': '印度尼西亚', 'Sudan': '苏丹',
+          'Libya': '利比亚', 'Iran': '伊朗', 'Mongolia': '蒙古', 'Peru': '秘鲁', 'Chad': '乍得',
+          'Niger': '尼日尔', 'Angola': '安哥拉', 'Mali': '马里', 'South Africa': '南非',
+          'Colombia': '哥伦比亚', 'Ethiopia': '埃塞俄比亚', 'Bolivia': '玻利维亚', 'Mauritania': '毛里塔尼亚',
+          'Egypt': '埃及', 'Tanzania': '坦桑尼亚', 'Nigeria': '尼日利亚', 'Venezuela': '委内瑞拉',
+          'Namibia': '纳米比亚', 'Mozambique': '莫桑比克', 'Pakistan': '巴基斯坦', 'Turkey': '土耳其',
+          'Chile': '智利', 'Zambia': '赞比亚', 'Myanmar': '缅甸', 'Afghanistan': '阿富汗',
+          'South Sudan': '南苏丹', 'France': '法国', 'Somalia': '索马里', 'Central African Republic': '中非共和国',
+          'Ukraine': '乌克兰', 'Madagascar': '马达加斯加', 'Botswana': '博茨瓦纳', 'Kenya': '肯尼亚',
+          'Yemen': '也门', 'Thailand': '泰国', 'Spain': '西班牙', 'Turkmenistan': '土库曼斯坦',
+          'Cameroon': '喀麦隆', 'Papua New Guinea': '巴布亚新几内亚', 'Sweden': '瑞典', 'Uzbekistan': '乌兹别克斯坦',
+          'Morocco': '摩洛哥', 'Iraq': '伊拉克', 'Paraguay': '巴拉圭', 'Zimbabwe': '津巴布韦',
+          'Norway': '挪威', 'Japan': '日本', 'Germany': '德国', 'Republic of the Congo': '刚果（布）',
+          'Finland': '芬兰', 'Vietnam': '越南', 'Malaysia': '马来西亚', 'Poland': '波兰', 'Oman': '阿曼',
+          'Italy': '意大利', 'Philippines': '菲律宾', 'Ecuador': '厄瓜多尔', 'Burkina Faso': '布基纳法索',
+          'New Zealand': '新西兰', 'Gabon': '加蓬', 'Guinea': '几内亚', 'United Kingdom': '英国',
+          'Uganda': '乌干达', 'Ghana': '加纳', 'Romania': '罗马尼亚', 'Laos': '老挝', 'Guyana': '圭亚那',
+          'Belarus': '白俄罗斯', 'Kyrgyzstan': '吉尔吉斯斯坦', 'Senegal': '塞内加尔', 'Syria': '叙利亚',
+          'Cambodia': '柬埔寨', 'Uruguay': '乌拉圭', 'Tunisia': '突尼斯', 'Suriname': '苏里南',
+          'Bangladesh': '孟加拉国', 'Nepal': '尼泊尔', 'Tajikistan': '塔吉克斯坦', 'Greece': '希腊',
+          'Nicaragua': '尼加拉瓜', 'North Korea': '朝鲜', 'Malawi': '马拉维', 'Eritrea': '厄立特里亚',
+          'Benin': '贝宁', 'Honduras': '洪都拉斯', 'Liberia': '利比里亚', 'Bulgaria': '保加利亚',
+          'Cuba': '古巴', 'Guatemala': '危地马拉', 'Iceland': '冰岛', 'South Korea': '韩国',
+          'Hungary': '匈牙利', 'Jordan': '约旦', 'Portugal': '葡萄牙', 'Serbia': '塞尔维亚',
+          'Azerbaijan': '阿塞拜疆', 'Austria': '奥地利', 'United Arab Emirates': '阿联酋',
+          'Czech Republic': '捷克', 'Panama': '巴拿马', 'Sierra Leone': '塞拉利昂', 'Ireland': '爱尔兰',
+          'Georgia': '格鲁吉亚', 'Sri Lanka': '斯里兰卡', 'Lithuania': '立陶宛', 'Latvia': '拉脱维亚',
+          'Togo': '多哥', 'Croatia': '克罗地亚', 'Bosnia and Herzegovina': '波黑', 'Costa Rica': '哥斯达黎加',
+          'Slovakia': '斯洛伐克', 'Dominican Republic': '多米尼加共和国', 'Estonia': '爱沙尼亚',
+          'Denmark': '丹麦', 'Netherlands': '荷兰', 'Switzerland': '瑞士', 'Bhutan': '不丹',
+          'Guinea-Bissau': '几内亚比绍', 'Taiwan': '台湾', 'Armenia': '亚美尼亚', 'Lesotho': '莱索托',
+          'Belgium': '比利时', 'Equatorial Guinea': '赤道几内亚', 'Solomon Islands': '所罗门群岛',
+          'Haiti': '海地', 'Albania': '阿尔巴尼亚', 'Burundi': '布隆迪', 'Macedonia': '北马其顿',
+          'Djibouti': '吉布提', 'Belize': '伯利兹', 'El Salvador': '萨尔瓦多', 'Israel': '以色列',
+          'Slovenia': '斯洛文尼亚', 'Fiji': '斐济', 'Kuwait': '科威特', 'Swaziland': '斯威士兰',
+          'Timor-Leste': '东帝汶', 'Montenegro': '黑山', 'Lebanon': '黎巴嫩', 'Cyprus': '塞浦路斯',
+          'Jamaica': '牙买加', 'Gambia': '冈比亚', 'Qatar': '卡塔尔', 'Vanuatu': '瓦努阿图',
+          'Brunei': '文莱', 'Trinidad and Tobago': '特立尼达和多巴哥', 'Cape Verde': '佛得角',
+          'Samoa': '萨摩亚', 'Luxembourg': '卢森堡', 'Mauritius': '毛里求斯', 'Comoros': '科摩罗',
+          'São Tomé and Príncipe': '圣多美和普林西比', 'Kiribati': '基里巴斯', 'Dominica': '多米尼克',
+          'Tonga': '汤加', 'Micronesia': '密克罗尼西亚', 'Singapore': '新加坡', 'Bahrain': '巴林',
+          'Saint Lucia': '圣卢西亚', 'Andorra': '安道尔', 'Palau': '帕劳', 'Seychelles': '塞舌尔',
+          'Antigua and Barbuda': '安提瓜和巴布达', 'Barbados': '巴巴多斯', 'Saint Vincent and the Grenadines': '圣文森特和格林纳丁斯',
+          'Grenada': '格林纳达', 'Malta': '马耳他', 'Maldives': '马尔代夫', 'Saint Kitts and Nevis': '圣基茨和尼维斯',
+          'Marshall Islands': '马绍尔群岛', 'Liechtenstein': '列支敦士登', 'San Marino': '圣马力诺',
+          'Tuvalu': '图瓦卢', 'Nauru': '瑙鲁', 'Monaco': '摩纳哥', 'Vatican City': '梵蒂冈'
+        };
+
+        // 计算在一起天数
+        const togetherDays = computed(() => {
+          const start = new Date(startDate.value);
+          const now = new Date();
+          const diff = now - start;
+          return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)));
+        });
+
+        // 根据当前地图模式过滤记忆
+        const filteredMemories = computed(() => {
+          return memories.value.filter(m => m.mapType === mapMode.value);
+        });
+
+        // ===== 本地存储读写 =====
+        const loadData = () => {
+          const data = JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}');
+          startDate.value = data.startDate || '2023-01-01';
+          couplePhoto.value = data.couplePhoto || '';
+          messages.value = data.messages || [
+            { id: 1, text: '和你在一起的每一天，都是最好的旅行。', date: '2023-01-01' },
+            { id: 2, text: '想和你一起去更多更远的地方。', date: '2023-05-20' },
+            { id: 3, text: '谢谢你一直陪在我身边。', date: '2024-02-14' },
+          ];
+          // 兼容旧数据：单张 photo 迁移为 photos 数组
+          memories.value = (data.memories || []).map(m => ({
+            ...m,
+            photos: m.photos || (m.photo ? [m.photo] : [])
+          }));
+        };
+
+        const saveData = () => {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify({
+            startDate: startDate.value,
+            couplePhoto: couplePhoto.value,
+            messages: messages.value,
+            memories: memories.value,
+          }));
+        };
+
+        // ===== ECharts 地图初始化与加载 =====
+        const initChart = () => {
+          if (chartInstance) return;
+          chartInstance = echarts.init(mapChart.value);
+
+          // 监听 DOM click：通过点击坐标反查 GeoJSON 区域
+          mapChart.value.addEventListener('click', e => {
+            const rect = mapChart.value.getBoundingClientRect();
+            const pointInPixel = [e.clientX - rect.left, e.clientY - rect.top];
+            const region = findRegionByPoint(pointInPixel);
+            if (region) {
+              locateRegion(region, false); // 先放大并居中点击区域
+              openRegionModal({ name: region });
+            }
+          });
+
+          // 窗口大小变化时自适应
+          window.addEventListener('resize', () => chartInstance && chartInstance.resize());
+        };
+
+        // 加载中国地级市地图：加载各省份 full.json，其下一级为地级市（直辖市为其下辖区县）
+        const loadChinaCityMap = async () => {
+          try {
+            const listRes = await fetch('https://geo.datav.aliyun.com/areas_v3/bound/all.json');
+            areaList = await listRes.json();
+            // 省级行政区
+            const provinces = areaList.filter(a => a.parent === 100000 && a.level === 'province');
+
+            chartInstance.showLoading({ text: '加载地级市中...', color: '#f472b6', textColor: '#f472b6' });
+            const provinceResults = await Promise.all(
+              provinces.map(p =>
+                fetch(`https://geo.datav.aliyun.com/areas_v3/bound/${p.adcode}_full.json`)
+                  .then(r => r.json())
+                  .catch(e => {
+                    console.warn(`加载 ${p.name} 地图失败`, e);
+                    return null;
+                  })
+              )
+            );
+
+            const allFeatures = [];
+            provinceResults.forEach(geo => {
+              if (geo && Array.isArray(geo.features)) {
+                allFeatures.push(...geo.features);
+              }
+            });
+
+            currentGeoJson = { type: 'FeatureCollection', features: allFeatures };
+            echarts.registerMap('china', currentGeoJson);
+          } catch (e) {
+            console.error('地级市地图加载失败，降级到省级地图', e);
+            const res = await fetch('https://geo.datav.aliyun.com/areas_v3/bound/100000_full.json');
+            currentGeoJson = await res.json();
+            echarts.registerMap('china', currentGeoJson);
+          }
+        };
+
+        const loadMap = async () => {
+          if (!chartInstance) initChart();
+          chartInstance.showLoading({ text: '地图加载中...', color: '#f472b6', textColor: '#f472b6' });
+
+          try {
+            if (mapMode.value === 'china') {
+              // 中国地图：地级市级别
+              await loadChinaCityMap();
+            } else {
+              // ECharts 官方世界地图数据
+              const res = await fetch('https://cdn.jsdelivr.net/npm/echarts@4.9.0/map/json/world.json');
+              currentGeoJson = await res.json();
+              echarts.registerMap('world', currentGeoJson);
+            }
+            updateChart();
+          } catch (e) {
+            console.error('地图数据加载失败', e);
+            alert('地图数据加载失败，请检查网络后刷新页面');
+          } finally {
+            chartInstance.hideLoading();
+          }
+        };
+
+        // 判断点是否在多边形内（射线法）
+        const pointInPolygon = (point, polygon) => {
+          let inside = false;
+          for (let i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
+            const xi = polygon[i][0], yi = polygon[i][1];
+            const xj = polygon[j][0], yj = polygon[j][1];
+            const intersect = ((yi > point[1]) !== (yj > point[1])) &&
+              (point[0] < (xj - xi) * (point[1] - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+          }
+          return inside;
+        };
+
+        // 通过像素坐标反查当前地图区域名称
+        const findRegionByPoint = (pointInPixel) => {
+          if (!chartInstance || !currentGeoJson) return null;
+          const geoCoord = chartInstance.convertFromPixel({ seriesIndex: 0 }, pointInPixel);
+          if (!geoCoord || isNaN(geoCoord[0]) || isNaN(geoCoord[1])) return null;
+          for (const feature of currentGeoJson.features) {
+            const geometry = feature.geometry;
+            const name = feature.properties && (feature.properties.name || feature.properties.NAME);
+            if (!name) continue;
+            if (geometry.type === 'Polygon') {
+              if (pointInPolygon(geoCoord, geometry.coordinates[0])) return name;
+            } else if (geometry.type === 'MultiPolygon') {
+              for (const polygon of geometry.coordinates) {
+                if (pointInPolygon(geoCoord, polygon[0])) return name;
+              }
+            }
+          }
+          return null;
+        };
+
+        // 计算 GeoJSON 区域的近似中心坐标
+        const getFeatureCenter = (feature) => {
+          const geometry = feature.geometry;
+          let coords = [];
+          if (geometry.type === 'Point') {
+            coords = [geometry.coordinates];
+          } else if (geometry.type === 'Polygon') {
+            coords = geometry.coordinates[0];
+          } else if (geometry.type === 'MultiPolygon') {
+            coords = geometry.coordinates[0][0];
+          }
+          if (!coords.length) return null;
+          let sumX = 0, sumY = 0;
+          coords.forEach(c => { sumX += c[0]; sumY += c[1]; });
+          return [sumX / coords.length, sumY / coords.length];
+        };
+
+        // 搜索输入处理：直接匹配地名，并支持通过子区域查找所属地级市/直辖市
+        const onSearchInput = () => {
+          const q = searchQuery.value.trim();
+          if (!q || !currentGeoJson) {
+            searchResults.value = [];
+            return;
+          }
+          const seen = new Set();
+          const results = [];
+
+          // 1. 直接匹配当前地图中的 feature 名称
+          for (const f of currentGeoJson.features) {
+            const name = f.properties && (f.properties.name || f.properties.NAME);
+            if (name && name.includes(q) && !seen.has(name)) {
+              seen.add(name);
+              results.push({ name, feature: f });
+              if (results.length >= 10) break;
+            }
+          }
+
+          // 2. 通过行政区划列表查找子区域所属地级市/直辖市
+          if (areaList.length && results.length < 10) {
+            const matchedChildren = areaList.filter(a => a.name && a.name.includes(q));
+            for (const child of matchedChildren) {
+              let target = child;
+              // 向上追溯到 city 级别，直辖市则追溯到 province 级别
+              while (target && target.parent &&
+                     !(target.level === 'city' || (target.level === 'province' && target.parent === 100000))) {
+                target = areaList.find(a => a.adcode === target.parent);
+              }
+              if (!target || !(target.level === 'city' || (target.level === 'province' && target.parent === 100000))) continue;
+
+              const cityFeature = currentGeoJson.features.find(f => {
+                const n = f.properties && (f.properties.name || f.properties.NAME);
+                return n === target.name;
+              });
+              if (cityFeature) {
+                const name = cityFeature.properties.name || cityFeature.properties.NAME;
+                if (!seen.has(name)) {
+                  seen.add(name);
+                  results.push({ name, feature: cityFeature });
+                  if (results.length >= 10) break;
+                }
+              }
+            }
+          }
+
+          searchResults.value = results;
+        };
+
+        // 定位到指定区域：切换到首页，平移并放大到该区域
+        const locateRegion = (name, switchView = true) => {
+          if (!currentGeoJson || !chartInstance) return;
+          const feature = currentGeoJson.features.find(f => {
+            const n = f.properties && (f.properties.name || f.properties.NAME);
+            return n === name;
+          });
+          if (!feature) return;
+          const center = getFeatureCenter(feature);
+          if (!center) return;
+
+          searchResults.value = [];
+          if (switchView) currentView.value = 'home';
+          nextTick(() => {
+            chartInstance.resize();
+            chartInstance.setOption({
+              series: [{
+                center: center,
+                zoom: 6
+              }]
+            });
+            chartInstance.dispatchAction({ type: 'highlight', seriesIndex: 0, name });
+            chartInstance.dispatchAction({ type: 'showTip', seriesIndex: 0, name });
+            showToast(`已定位到：${name}`);
+          });
+        };
+
+        const selectSearchResult = (r) => {
+          searchQuery.value = r.name;
+          locateRegion(r.name);
+        };
+
+        const confirmSearch = () => {
+          if (searchResults.value.length) {
+            selectSearchResult(searchResults.value[0]);
+          }
+        };
+
+        // 生成区域照片填充图案：单张铺满，多张拼成 2x2 或 1xN
+        const createRegionPattern = (photos) => {
+          return new Promise((resolve) => {
+            const canvas = document.createElement('canvas');
+            const size = 200;
+            canvas.width = size;
+            canvas.height = size;
+            const ctx = canvas.getContext('2d');
+
+            const validPhotos = photos.slice(0, 4); // 最多 4 张
+            const count = validPhotos.length;
+            let cols = 1, rows = 1;
+            if (count === 2) { cols = 2; rows = 1; }
+            else if (count === 3) { cols = 3; rows = 1; }
+            else if (count >= 4) { cols = 2; rows = 2; }
+            const cellW = size / cols;
+            const cellH = size / rows;
+
+            if (count === 0) {
+              resolve(canvas);
+              return;
+            }
+
+            let loaded = 0;
+            validPhotos.forEach((photo, i) => {
+              const img = new Image();
+              img.onload = () => {
+                const col = i % cols;
+                const row = Math.floor(i / cols);
+                ctx.drawImage(img, col * cellW, row * cellH, cellW, cellH);
+                loaded++;
+                if (loaded === count) resolve(canvas);
+              };
+              img.onerror = () => {
+                loaded++;
+                if (loaded === count) resolve(canvas);
+              };
+              img.src = photo;
+            });
+          });
+        };
+
+        const updateChart = async () => {
+          if (!chartInstance) return;
+          const isChina = mapMode.value === 'china';
+          const mapName = isChina ? 'china' : 'world';
+
+          // 按 region 聚合所有照片
+          const regionPhotos = {};
+          filteredMemories.value.forEach(m => {
+            const photos = m.photos || (m.photo ? [m.photo] : []);
+            photos.forEach(photo => {
+              if (!photo) return;
+              if (!regionPhotos[m.region]) regionPhotos[m.region] = [];
+              regionPhotos[m.region].push(photo);
+            });
+          });
+
+          // 为每个有照片的区域生成填充图案
+          const regionData = [];
+          for (const [region, photos] of Object.entries(regionPhotos)) {
+            const pattern = await createRegionPattern(photos);
+            regionData.push({
+              name: region,
+              itemStyle: {
+                areaColor: { image: pattern, repeat: 'no-repeat' },
+                borderColor: '#fff',
+                borderWidth: 1
+              },
+              label: { show: true, color: '#fff', fontSize: 10 },
+              select: {
+                itemStyle: {
+                  areaColor: { image: pattern, repeat: 'no-repeat' }
+                }
+              }
+            });
+          }
+
+          chartInstance.setOption({
+            tooltip: {
+              trigger: 'item',
+              formatter: '{b}'
+            },
+            series: [{
+              type: 'map',
+              map: mapName,
+              nameMap: isChina ? {} : worldNameMap,
+              roam: true,           // 开启缩放和平移
+              scaleLimit: { min: 1, max: 10 },
+              // layoutCenter + layoutSize：中国地图贴近方框左右两边
+              layoutCenter: ['50%', '50%'],
+              layoutSize: isChina ? '100%' : '95%',
+              label: {
+                show: false,
+                color: '#be185d',
+                fontSize: 10
+              },
+              itemStyle: {
+                areaColor: '#fbcfe8',    // 浅粉色填充
+                borderColor: '#fff',     // 白色边界
+                borderWidth: 1
+              },
+              emphasis: {
+                label: { show: true, color: '#fff' },
+                itemStyle: {
+                  areaColor: '#f472b6',  // 悬浮深粉色
+                  shadowBlur: 10,
+                  shadowColor: 'rgba(244, 114, 182, 0.5)'
+                }
+              },
+              select: {
+                itemStyle: { areaColor: '#f472b6' },
+                label: { show: true, color: '#fff' }
+              },
+              data: regionData
+            }]
+          });
+        };
+
+        // ===== 弹窗操作 =====
+        const openRegionModal = (region) => {
+          modalType.value = 'region';
+          const displayName = worldNameMap[region.name] || region.name || region;
+          modalTitle.value = `记录：${displayName}`;
+          editingIndex.value = memories.value.findIndex(
+            m => m.mapType === mapMode.value && m.region === displayName
+          );
+          const existing = editingIndex.value >= 0 ? memories.value[editingIndex.value] : {};
+          form.value = {
+            region: displayName,
+            photos: existing.photos || (existing.photo ? [existing.photo] : []),
+            photo: existing.photo || '',
+            text: existing.text || '',
+            startDate: ''
+          };
+          showModal.value = true;
+        };
+
+        const toggleMap = () => {
+          mapMode.value = mapMode.value === 'china' ? 'world' : 'china';
+          loadMap();
+        };
+
+        const openDaysModal = () => {
+          modalType.value = 'days';
+          modalTitle.value = '设置在一起时间';
+          editingIndex.value = -1;
+          form.value = { region: '', photos: [], photo: couplePhoto.value, text: '', startDate: startDate.value };
+          showModal.value = true;
+        };
+
+        const addMessage = () => {
+          modalType.value = 'message';
+          modalTitle.value = '想对 TA 说';
+          editingIndex.value = -1;
+          form.value = { region: '', photos: [], photo: '', text: '', startDate: '' };
+          showModal.value = true;
+        };
+
+        const editMessage = (index) => {
+          modalType.value = 'message';
+          modalTitle.value = '编辑想说的话';
+          editingIndex.value = index;
+          form.value = { region: '', photos: [], photo: '', text: messages.value[index].text || '', startDate: '' };
+          showModal.value = true;
+        };
+
+        const closeModal = () => {
+          showModal.value = false;
+          form.value = { region: '', photos: [], photo: '', text: '', startDate: '' };
+          editingIndex.value = -1;
+        };
+
+        const handleFileUpload = (e) => {
+          const files = Array.from(e.target.files || []);
+          if (!files.length) return;
+
+          for (const file of files) {
+            if (!file.type.startsWith('image/')) {
+              showToast('请选择图片文件');
+              e.target.value = '';
+              return;
+            }
+            if (file.size > 5 * 1024 * 1024) {
+              showToast('单张图片不能超过 5MB');
+              e.target.value = '';
+              return;
+            }
+          }
+
+          if (modalType.value === 'region') {
+            const currentCount = form.value.photos ? form.value.photos.length : 0;
+            const remaining = 4 - currentCount;
+            const toAdd = files.slice(0, remaining);
+            if (files.length > remaining) {
+              showToast(`最多上传 4 张照片，已添加 ${toAdd.length} 张`);
+            }
+            toAdd.forEach(file => {
+              const reader = new FileReader();
+              reader.onload = (event) => {
+                if (!form.value.photos) form.value.photos = [];
+                form.value.photos.push(event.target.result);
+              };
+              reader.readAsDataURL(file);
+            });
+          } else {
+            const file = files[0];
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              form.value.photo = event.target.result;
+            };
+            reader.readAsDataURL(file);
+          }
+          e.target.value = '';
+        };
+
+        const removePhoto = (index) => {
+          form.value.photos.splice(index, 1);
+        };
+
+        const saveModal = () => {
+          if (modalType.value === 'region') {
+            const photos = form.value.photos || [];
+            const text = form.value.text || '';
+            const region = form.value.region;
+            if (!photos.length && !text.trim()) {
+              showToast('请至少上传一张照片或填写文字');
+              return;
+            }
+            if (editingIndex.value >= 0) {
+              memories.value[editingIndex.value] = {
+                ...memories.value[editingIndex.value],
+                photos,
+                photo: photos[0] || '',
+                text
+              };
+            } else {
+              memories.value.push({
+                id: Date.now(),
+                mapType: mapMode.value,
+                region,
+                photos,
+                photo: photos[0] || '',
+                text,
+                date: new Date().toISOString().split('T')[0]
+              });
+            }
+            showToast('记忆已保存');
+            updateChart();
+          } else if (modalType.value === 'days') {
+            if (form.value.startDate) startDate.value = form.value.startDate;
+            if (form.value.photo) couplePhoto.value = form.value.photo;
+            showToast('设置已保存');
+          } else if (modalType.value === 'message') {
+            if (!form.value.text.trim()) {
+              showToast('请填写内容');
+              return;
+            }
+            if (editingIndex.value >= 0) {
+              messages.value[editingIndex.value].text = form.value.text;
+            } else {
+              messages.value.push({
+                id: Date.now(),
+                text: form.value.text,
+                date: new Date().toISOString().split('T')[0]
+              });
+            }
+            showToast('留言已保存');
+          }
+          saveData();
+          closeModal();
+        };
+
+        onMounted(() => {
+          loadData();
+          loadMap();
+        });
+
+        return {
+          mapChart, mapMode, togetherDays, filteredMemories,
+          showModal, modalType, modalTitle, form,
+          currentView, searchQuery, searchResults, toast,
+          toggleMap,
+          onSearchInput, confirmSearch, selectSearchResult,
+          openRegionModal, openDaysModal, addMessage, editMessage,
+          closeModal, handleFileUpload, removePhoto, saveModal
+        };
+      }
+    }).mount('#app');
+  </script>
+</body>
+</html>
