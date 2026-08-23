@@ -632,14 +632,78 @@
           }
         };
 
-        // 生成区域照片填充图案：最多 16 张，拼成马赛克网格并居中裁剪为正方形
-        const createRegionPattern = (photos) => {
+        // 计算 GeoJSON 特征的最小外接矩形（经纬度范围）
+        const getFeatureBounds = (feature) => {
+          if (!feature || !feature.geometry) return null;
+          const coords = [];
+          const collectRing = (ring) => ring.forEach(p => coords.push(p));
+          const collectPolygon = (polygon) => polygon.forEach(collectRing);
+          const geometry = feature.geometry;
+          if (geometry.type === 'Polygon') {
+            collectPolygon(geometry.coordinates);
+          } else if (geometry.type === 'MultiPolygon') {
+            geometry.coordinates.forEach(collectPolygon);
+          }
+          if (!coords.length) return null;
+          let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+          coords.forEach(([lng, lat]) => {
+            minLng = Math.min(minLng, lng);
+            maxLng = Math.max(maxLng, lng);
+            minLat = Math.min(minLat, lat);
+            maxLat = Math.max(maxLat, lat);
+          });
+          const width = maxLng - minLng;
+          const height = maxLat - minLat;
+          if (width <= 0 || height <= 0) return null;
+          return { minLng, maxLng, minLat, maxLat, width, height };
+        };
+
+        // 生成区域照片填充图案：按地区最小外接矩形铺满照片，并裁剪到地区轮廓内
+        const createRegionPattern = (photos, feature) => {
           return new Promise((resolve) => {
+            const bounds = getFeatureBounds(feature);
+            const size = 800;
+            let canvasWidth = size;
+            let canvasHeight = size;
+            if (bounds) {
+              const aspect = bounds.width / bounds.height;
+              if (aspect >= 1) {
+                canvasWidth = size;
+                canvasHeight = size / aspect;
+              } else {
+                canvasWidth = size * aspect;
+                canvasHeight = size;
+              }
+            }
             const canvas = document.createElement('canvas');
-            const size = 400;
-            canvas.width = size;
-            canvas.height = size;
+            canvas.width = Math.max(1, Math.round(canvasWidth));
+            canvas.height = Math.max(1, Math.round(canvasHeight));
             const ctx = canvas.getContext('2d');
+
+            // 先按地区轮廓建立裁剪路径（超出边界的照片会被裁掉）
+            if (bounds) {
+              ctx.beginPath();
+              const project = ([lng, lat]) => {
+                const x = ((lng - bounds.minLng) / bounds.width) * canvas.width;
+                const y = ((bounds.maxLat - lat) / bounds.height) * canvas.height;
+                return [x, y];
+              };
+              const drawRing = (ring) => {
+                ring.forEach(([lng, lat], i) => {
+                  const [x, y] = project([lng, lat]);
+                  if (i === 0) ctx.moveTo(x, y);
+                  else ctx.lineTo(x, y);
+                });
+                ctx.closePath();
+              };
+              const geometry = feature.geometry;
+              if (geometry.type === 'Polygon') {
+                geometry.coordinates.forEach(drawRing);
+              } else if (geometry.type === 'MultiPolygon') {
+                geometry.coordinates.forEach(polygon => polygon.forEach(drawRing));
+              }
+              ctx.clip('evenodd');
+            }
 
             const validPhotos = photos.slice(0, 16); // 最多 16 张
             const count = validPhotos.length;
@@ -650,8 +714,8 @@
 
             const cols = Math.ceil(Math.sqrt(count));
             const rows = Math.ceil(count / cols);
-            const cellW = size / cols;
-            const cellH = size / rows;
+            const cellW = canvas.width / cols;
+            const cellH = canvas.height / rows;
 
             const drawCell = (img, i) => {
               const col = i % cols;
@@ -698,7 +762,11 @@
           // 为每个有照片的区域生成填充图案
           const regionData = [];
           for (const [region, photos] of Object.entries(regionPhotos)) {
-            const pattern = await createRegionPattern(photos);
+            const feature = currentGeoJson && currentGeoJson.features.find(f => {
+              const n = f.properties && (f.properties.name || f.properties.NAME);
+              return n === region;
+            });
+            const pattern = await createRegionPattern(photos, feature);
             regionData.push({
               name: region,
               itemStyle: {
