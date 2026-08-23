@@ -574,22 +574,10 @@
               }
               if (!target) continue;
 
-              let matchFeature = currentGeoJson.features.find(f => {
+              const matchFeature = currentGeoJson.features.find(f => {
                 const n = f.properties && (f.properties.name || f.properties.NAME);
                 return n === target.name;
               });
-
-              // 当前地图为省级时，若找不到地级市，则继续向上追溯到省级
-              if (!matchFeature && target.level === 'city') {
-                const province = areaList.find(a => a.adcode === target.parent);
-                if (province) {
-                  matchFeature = currentGeoJson.features.find(f => {
-                    const n = f.properties && (f.properties.name || f.properties.NAME);
-                    return n === province.name;
-                  });
-                  if (matchFeature) target = province;
-                }
-              }
 
               if (matchFeature) {
                 const name = matchFeature.properties.name || matchFeature.properties.NAME;
@@ -618,12 +606,13 @@
 
           searchResults.value = [];
           if (switchView) currentView.value = 'home';
+          const isCityLevel = currentGeoJson.features.length > 100;
           nextTick(() => {
             chartInstance.resize();
             chartInstance.setOption({
               series: [{
                 center: center,
-                zoom: 6
+                zoom: isCityLevel ? 8 : 6
               }]
             });
             chartInstance.dispatchAction({ type: 'highlight', seriesIndex: 0, name });
