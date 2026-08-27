@@ -773,7 +773,10 @@
             let canvasWidth = size;
             let canvasHeight = size;
             if (bounds) {
-              const aspect = bounds.width / bounds.height;
+              // 使用墨卡托投影后的高度计算宽高比，减少图案拉伸
+              const mercatorY = lat => Math.log(Math.tan((90 + lat) * Math.PI / 360));
+              const projectedHeight = Math.max(0.0001, Math.abs(mercatorY(bounds.maxLat) - mercatorY(bounds.minLat)));
+              const aspect = bounds.width / projectedHeight;
               if (aspect >= 1) {
                 canvasWidth = size;
                 canvasHeight = size / aspect;
@@ -786,10 +789,6 @@
             canvas.width = Math.max(1, Math.round(canvasWidth));
             canvas.height = Math.max(1, Math.round(canvasHeight));
             const ctx = canvas.getContext('2d');
-
-            // 填充浅色背景，让照片区域在地图上更醒目
-            ctx.fillStyle = '#fff0f5';
-            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             // 先按地区轮廓建立裁剪路径（超出边界的照片会被裁掉）
             if (bounds) {
@@ -831,17 +830,11 @@
             const drawCell = (img, i) => {
               const col = i % cols;
               const row = Math.floor(i / cols);
-              // 按比例缩小完整显示照片（contain，不放大），照片之间不重叠
-              const scale = Math.min(cellW / img.width, cellH / img.height, 1);
-              const dw = img.width * scale;
-              const dh = img.height * scale;
-              const dx = col * cellW + (cellW - dw) / 2;
-              const dy = row * cellH + (cellH - dh) / 2;
-              ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, dw, dh);
-              // 白色边框让网格更清晰
-              ctx.strokeStyle = '#fff';
-              ctx.lineWidth = Math.max(2, Math.min(cellW, cellH) * 0.02);
-              ctx.strokeRect(col * cellW, row * cellH, cellW, cellH);
+              // 照片铺满格子（cover 居中裁剪），实现类似参考图的密集马赛克效果
+              const crop = Math.min(img.width, img.height);
+              const sx = (img.width - crop) / 2;
+              const sy = (img.height - crop) / 2;
+              ctx.drawImage(img, sx, sy, crop, crop, col * cellW, row * cellH, cellW, cellH);
             };
 
             let loaded = 0;
