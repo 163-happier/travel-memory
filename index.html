@@ -101,17 +101,17 @@
             <!-- 搜索下拉结果 -->
             <div
               v-if="searchResults.length"
-              class="absolute z-10 left-0 right-0 mt-2 bg-white rounded-lg shadow-lg border border-pink-100 max-h-60 overflow-y-auto"
-              @mousedown.stop>
-              <div
+              class="absolute z-10 left-0 right-0 mt-2 bg-white rounded-lg shadow-lg border border-pink-100 max-h-60 overflow-y-auto">
+              <button
                 v-for="r in searchResults"
                 :key="r.name"
-                @mousedown.stop="selectSearchResult(r)"
-                class="px-4 py-2.5 text-pink-700 hover:bg-pink-50 cursor-pointer text-sm border-b border-pink-50 last:border-0">
-                {{ r.name }}
-              </div>
+                type="button"
+                @click.stop="selectSearchResult(r)"
+                class="w-full text-left px-4 py-2.5 text-pink-700 hover:bg-pink-50 text-sm border-b border-pink-50 last:border-0 bg-transparent">
+                {{ r.display || r.name }}
+              </button>
             </div>
-            <p v-if="searchQuery && !searchResults.length" class="text-pink-400 text-xs mt-2">未找到相关地点</p>
+            <p v-if="searchQuery && !searchResults.length && !highlightedRegions.length" class="text-pink-400 text-xs mt-2">未找到相关地点</p>
           </div>
         </section>
 
@@ -326,6 +326,7 @@
         // ===== 地图搜索状态 =====
         const searchQuery = ref('');
         const searchResults = ref([]);
+        const highlightedRegions = ref([]); // 搜索后高亮的地区（深粉色）
 
         // ===== Toast 提示 =====
         const toast = ref({ show: false, message: '' });
@@ -436,6 +437,7 @@
           // 监听 ECharts 地图点击事件
           chartInstance.on('click', params => {
             if (params && params.name) {
+              highlightedRegions.value = []; // 点击地图区域后取消搜索高亮
               locateRegion(params.name, false); // 先放大并居中点击区域
               openRegionModal({ name: params.name });
             }
@@ -543,6 +545,7 @@
 
         // 搜索输入处理：直接匹配地名，并支持通过子区域查找所属地级市/直辖市
         const onSearchInput = () => {
+          highlightedRegions.value = []; // 新搜索时取消旧高亮
           const q = searchQuery.value.trim();
           if (!q || !currentGeoJson) {
             searchResults.value = [];
@@ -550,6 +553,24 @@
           }
           const seen = new Set();
           const results = [];
+
+          // 0. 如果 query 匹配省份名，优先添加“全省”结果
+          const provinceNames = new Set();
+          if (areaList.length) {
+            areaList.filter(a => a.level === 'province').forEach(a => { if (a.name) provinceNames.add(a.name); });
+          } else if (currentGeoJson) {
+            currentGeoJson.features.forEach(f => {
+              const province = f.properties && f.properties.province;
+              if (province) provinceNames.add(province);
+            });
+          }
+          for (const provinceName of provinceNames) {
+            if (provinceName.includes(q) && !seen.has(provinceName)) {
+              seen.add(provinceName);
+              results.push({ name: provinceName, display: `${provinceName}（全省）` });
+              if (results.length >= 10) break;
+            }
+          }
 
           // 1. 直接匹配当前地图中的 feature 名称或所属省份
           for (const f of currentGeoJson.features) {
@@ -593,30 +614,116 @@
           searchResults.value = results;
         };
 
-        // 定位到指定区域：切换到首页，平移并放大到该区域
+        // 计算多个特征的整体边界
+        const getCombinedBounds = (features) => {
+          if (!features || !features.length) return null;
+          let minLng = Infinity, maxLng = -Infinity, minLat = Infinity, maxLat = -Infinity;
+          let hasValid = false;
+          for (const feature of features) {
+            const bounds = getFeatureBounds(feature);
+            if (!bounds) continue;
+            hasValid = true;
+            minLng = Math.min(minLng, bounds.minLng);
+            maxLng = Math.max(maxLng, bounds.maxLng);
+            minLat = Math.min(minLat, bounds.minLat);
+            maxLat = Math.max(maxLat, bounds.maxLat);
+          }
+          if (!hasValid) return null;
+          const width = maxLng - minLng;
+          const height = maxLat - minLat;
+          if (width <= 0 || height <= 0) return null;
+          return { minLng, maxLng, minLat, maxLat, width, height };
+        };
+
+        // 根据省名查找该省所有地级市
+        const findProvinceCities = (provinceName) => {
+          if (!currentGeoJson) return [];
+          const cities = [];
+          // 优先使用 GeoJSON 中的 province 属性
+          for (const f of currentGeoJson.features) {
+            const province = f.properties && f.properties.province;
+            const name = f.properties && (f.properties.name || f.properties.NAME);
+            if (province && name && province.includes(provinceName)) {
+              cities.push({ name, feature: f });
+            }
+          }
+          if (cities.length) return cities;
+          // 否则通过行政区划列表反查
+          if (!areaList.length) return [];
+          const provinceEntry = areaList.find(a => a.level === 'province' && a.name && a.name.includes(provinceName));
+          if (!provinceEntry) return [];
+          const cityEntries = areaList.filter(a => a.parent === provinceEntry.adcode && a.level === 'city');
+          for (const entry of cityEntries) {
+            const feature = currentGeoJson.features.find(f => {
+              const n = f.properties && (f.properties.name || f.properties.NAME);
+              return n === entry.name;
+            });
+            if (feature) {
+              const name = feature.properties.name || feature.properties.NAME;
+              cities.push({ name, feature });
+            }
+          }
+          return cities;
+        };
+
+        // 定位到指定区域：切换到首页，平亮目标区域为深粉色，平移并放大
         const locateRegion = (name, switchView = true) => {
           if (!currentGeoJson || !chartInstance) return;
+
+          let targetNames = [];
+          let targetFeatures = [];
+
+          // 先尝试作为城市/地区直接匹配
           const feature = currentGeoJson.features.find(f => {
             const n = f.properties && (f.properties.name || f.properties.NAME);
             return n === name;
           });
-          if (!feature) return;
-          const center = getFeatureCenter(feature);
+
+          if (feature) {
+            targetNames = [name];
+            targetFeatures = [feature];
+          } else {
+            // 尝试作为省份匹配，高亮该省所有地级市
+            const provinceCities = findProvinceCities(name);
+            if (provinceCities.length) {
+              targetNames = provinceCities.map(c => c.name);
+              targetFeatures = provinceCities.map(c => c.feature);
+            }
+          }
+
+          if (!targetFeatures.length) return;
+
+          const bounds = getCombinedBounds(targetFeatures);
+          const center = bounds
+            ? [bounds.minLng + bounds.width / 2, bounds.minLat + bounds.height / 2]
+            : getFeatureCenter(targetFeatures[0]);
           if (!center) return;
 
+          highlightedRegions.value = targetNames;
           searchResults.value = [];
           if (switchView) currentView.value = 'home';
+
           const isCityLevel = currentGeoJson.features.length > 100;
+          const isProvince = targetFeatures.length > 1;
           nextTick(() => {
             chartInstance.resize();
+            // 根据目标边界与全图边界计算合适缩放级别
+            const fullBounds = getCombinedBounds(currentGeoJson.features);
+            let zoom = isCityLevel ? 8 : 6;
+            if (fullBounds && bounds) {
+              const fitZoom = Math.min(
+                fullBounds.width / bounds.width,
+                fullBounds.height / bounds.height
+              ) * 0.85;
+              zoom = isProvince ? Math.min(fitZoom, 8) : Math.min(fitZoom, 12);
+            }
             chartInstance.setOption({
               series: [{
                 center: center,
-                zoom: isCityLevel ? 8 : 6
+                zoom: zoom
               }]
             });
-            chartInstance.dispatchAction({ type: 'highlight', seriesIndex: 0, name });
-            chartInstance.dispatchAction({ type: 'showTip', seriesIndex: 0, name });
+            updateChart();
             showToast(`已定位到：${name}`);
           });
         };
@@ -720,10 +827,13 @@
             const drawCell = (img, i) => {
               const col = i % cols;
               const row = Math.floor(i / cols);
-              const crop = Math.min(img.width, img.height);
-              const sx = (img.width - crop) / 2;
-              const sy = (img.height - crop) / 2;
-              ctx.drawImage(img, sx, sy, crop, crop, col * cellW, row * cellH, cellW, cellH);
+              // 按比例缩小完整显示照片（contain，不放大），照片之间不重叠
+              const scale = Math.min(cellW / img.width, cellH / img.height, 1);
+              const dw = img.width * scale;
+              const dh = img.height * scale;
+              const dx = col * cellW + (cellW - dw) / 2;
+              const dy = row * cellH + (cellH - dh) / 2;
+              ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, dw, dh);
             };
 
             let loaded = 0;
@@ -759,28 +869,45 @@
             });
           });
 
-          // 为每个有照片的区域生成填充图案
+          // 为每个有照片的区域生成填充图案，同时处理搜索高亮
           const regionData = [];
+          const highlightedSet = new Set(highlightedRegions.value);
           for (const [region, photos] of Object.entries(regionPhotos)) {
             const feature = currentGeoJson && currentGeoJson.features.find(f => {
               const n = f.properties && (f.properties.name || f.properties.NAME);
               return n === region;
             });
-            const pattern = await createRegionPattern(photos, feature);
+            const isHighlighted = highlightedSet.has(region);
+            const pattern = isHighlighted ? null : await createRegionPattern(photos, feature);
             regionData.push({
               name: region,
               itemStyle: {
-                areaColor: { image: pattern, repeat: 'no-repeat' },
+                areaColor: isHighlighted ? '#be185d' : { image: pattern, repeat: 'no-repeat' },
                 borderColor: '#fff',
                 borderWidth: 1
               },
               label: { show: true, color: '#fff', fontSize: 10 },
               select: {
                 itemStyle: {
-                  areaColor: { image: pattern, repeat: 'no-repeat' }
+                  areaColor: isHighlighted ? '#be185d' : { image: pattern, repeat: 'no-repeat' }
                 }
               }
             });
+          }
+
+          // 为没有照片但被搜索高亮的区域也加上深粉色
+          for (const name of highlightedRegions.value) {
+            if (!regionPhotos[name]) {
+              regionData.push({
+                name,
+                itemStyle: {
+                  areaColor: '#be185d',
+                  borderColor: '#fff',
+                  borderWidth: 1
+                },
+                label: { show: true, color: '#fff', fontSize: 10 }
+              });
+            }
           }
 
           chartInstance.setOption({
@@ -845,6 +972,9 @@
 
         const toggleMap = () => {
           mapMode.value = mapMode.value === 'china' ? 'world' : 'china';
+          highlightedRegions.value = [];
+          searchQuery.value = '';
+          searchResults.value = [];
           loadMap();
         };
 
@@ -1030,7 +1160,7 @@
         return {
           mapChart, mapMode, togetherDays, startDate, couplePhoto, messages, filteredMemories,
           showModal, modalType, modalTitle, form,
-          currentView, searchQuery, searchResults, toast,
+          currentView, searchQuery, searchResults, highlightedRegions, toast,
           toggleMap,
           onSearchInput, confirmSearch, selectSearchResult,
           openRegionModal, openDaysModal, addMessage, editMessage,
