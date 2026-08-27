@@ -769,7 +769,7 @@
         const createRegionPattern = (photos, feature) => {
           return new Promise((resolve) => {
             const bounds = getFeatureBounds(feature);
-            const size = 800;
+            const size = 1200;
             let canvasWidth = size;
             let canvasHeight = size;
             if (bounds) {
@@ -786,6 +786,10 @@
             canvas.width = Math.max(1, Math.round(canvasWidth));
             canvas.height = Math.max(1, Math.round(canvasHeight));
             const ctx = canvas.getContext('2d');
+
+            // 填充浅色背景，让照片区域在地图上更醒目
+            ctx.fillStyle = '#fff0f5';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
 
             // 先按地区轮廓建立裁剪路径（超出边界的照片会被裁掉）
             if (bounds) {
@@ -815,7 +819,7 @@
             const validPhotos = photos.slice(0, 16); // 最多 16 张
             const count = validPhotos.length;
             if (count === 0) {
-              resolve(canvas);
+              resolve(canvas.toDataURL('image/png'));
               return;
             }
 
@@ -834,6 +838,10 @@
               const dx = col * cellW + (cellW - dw) / 2;
               const dy = row * cellH + (cellH - dh) / 2;
               ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, dw, dh);
+              // 白色边框让网格更清晰
+              ctx.strokeStyle = '#fff';
+              ctx.lineWidth = Math.max(2, Math.min(cellW, cellH) * 0.02);
+              ctx.strokeRect(col * cellW, row * cellH, cellW, cellH);
             };
 
             let loaded = 0;
@@ -842,11 +850,11 @@
               img.onload = () => {
                 drawCell(img, i);
                 loaded++;
-                if (loaded === count) resolve(canvas);
+                if (loaded === count) resolve(canvas.toDataURL('image/png'));
               };
               img.onerror = () => {
                 loaded++;
-                if (loaded === count) resolve(canvas);
+                if (loaded === count) resolve(canvas.toDataURL('image/png'));
               };
               img.src = photo;
             });
@@ -1064,7 +1072,7 @@
               showToast(`最多上传 16 张照片，已添加 ${toAdd.length} 张`);
             }
             const totalCount = currentCount + toAdd.length;
-            const maxSize = totalCount <= 4 ? 600 : totalCount <= 9 ? 400 : 250;
+            const maxSize = totalCount === 1 ? 1200 : totalCount <= 4 ? 800 : totalCount <= 9 ? 500 : 300;
             const compressed = await Promise.all(
               toAdd.map(file => compressImage(file, { maxSize, quality: 0.75, square: true }))
             );
